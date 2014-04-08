@@ -18,33 +18,45 @@ declare ACURSOR cursor local fast_forward for
 open ACURSOR;
 fetch next from ACURSOR into @AVARIABLE;
 
-declare @TABLE table (ADHOCQUERYID uniqueidentifier, ADHOCQUERYNAME nvarchar(100), IDSETID uniqueidentifier, IDSETNAME nvarchar(100))
+declare @TABLE table (ADHOCQUERYID uniqueidentifier, IDSETID uniqueidentifier)
 
 
 while @@FETCH_STATUS = 0
 begin
 	with xmlnamespaces ('Blackbaud.AppFx.WebService.API.1' as [ns])
-	
+
 	insert into @TABLE
-	select @AVARIABLE.value('(ns:AdHocQuery/@ID)[1]','uniqueidentifier'), @AVARIABLE.value('(ns:AdHocQuery/@Name)[1]','nvarchar(100)'), ISR.ID, ISR.NAME
-		from @AVARIABLE.nodes('ns:AdHocQuery/*/ns:f/ns:IDSetFieldInfo') as T(c) 
-			inner join IDSETREGISTER ISR on ISR.ID=T.c.value('(ns:ID)[1]', 'uniqueidentifier')
-					
+	select @AVARIABLE.value('(ns:AdHocQuery/@ID)[1]','uniqueidentifier'), T.c.value('(ns:ID)[1]', 'uniqueidentifier')
+		from @AVARIABLE.nodes('ns:AdHocQuery/*/ns:f/ns:IDSetFieldInfo') as T(c)
+
 	fetch next from ACURSOR into @AVARIABLE;	
 end
 
 close ACURSOR;
 deallocate ACURSOR;
 
-select ISR.NAME SELECTION, ISR.DESCRIPTION SELECTION_DESCRIPTION, ISR.DBOBJECTNAME, case when ISRAQ.ADHOCQUERYID IS null then 0 else 1 end as SELECTION_IS_QUERY , T.ADHOCQUERYNAME USED_IN_QUERY, CP.NAME USED_IN_CORRESPONDENCEPROCESS, MS.NAME USED_IN_SEGMENT
+select ISR.NAME SELECTION, ISR.DESCRIPTION SELECTION_DESCRIPTION, ISR.DBOBJECTNAME SELECTION_OBJECTNAME, AQ.NAME+' (Ad-hoc Query)' USED_IN
 from IDSETREGISTER ISR
-	left join @TABLE T on T.IDSETID=ISR.ID
-	left join IDSETREGISTERADHOCQUERY ISRAQ on ISRAQ.IDSETREGISTERID=ISR.ID
-	left join ADHOCQUERY AQ on AQ.ID=ISRAQ.ADHOCQUERYID	
-	left join CORRESPONDENCEPROCESS CP on CP.IDSETREGISTERID=ISR.ID
-	left join MKTSEGMENTSELECTION MSS on ISR.ID=MSS.SELECTIONID
-	left join MKTSEGMENT MS on MS.ID=MSS.SEGMENTID
-	
+	inner join @TABLE T on T.IDSETID=ISR.ID
+	inner join ADHOCQUERY AQ on AQ.ID=T.ADHOCQUERYID	
+	left join IDSETREGISTERADHOCQUERY ISRAQ on ISRAQ.IDSETREGISTERID=ISR.ID 
+where AQ.ID is not NULL 
 
-where not(T.ADHOCQUERYID is null and CP.ID is null and MS.ID is null) 
-order by IDSETNAME
+UNION
+
+select ISR.NAME SELECTION, ISR.DESCRIPTION SELECTION_DESCRIPTION, ISR.DBOBJECTNAME SELECTION_OBJECTNAME, CP.NAME+' (Correspondence Process)' USED_IN
+from IDSETREGISTER ISR
+	inner join CORRESPONDENCEPROCESS CP on CP.IDSETREGISTERID=ISR.ID
+	left join IDSETREGISTERADHOCQUERY ISRAQ on ISRAQ.IDSETREGISTERID=ISR.ID 
+where CP.ID is not NULL 
+
+UNION
+
+select ISR.NAME SELECTION, ISR.DESCRIPTION SELECTION_DESCRIPTION, ISR.DBOBJECTNAME SELECTION_OBJECTNAME, MS.NAME +' (Marketing Segment)' USED_IN
+from IDSETREGISTER ISR
+	inner join MKTSEGMENTSELECTION MSS on ISR.ID=MSS.SELECTIONID
+	inner join MKTSEGMENT MS on MS.ID=MSS.SEGMENTID
+	left join IDSETREGISTERADHOCQUERY ISRAQ on ISRAQ.IDSETREGISTERID=ISR.ID 
+where MS.ID is not NULL 
+ 
+order by ISR.NAME
